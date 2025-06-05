@@ -1,0 +1,6 @@
+id,name,description,timestamp
+1,Initial Round,Initial round for proposing variants,2025-05-05T09:06:32.927357
+2,Initial Round,Initial round for proposing variants,2025-05-05T10:05:06.963280
+3,Round 1,Initial round,2025-05-05T10:28:51.285075
+4,Round 2,Active learning round 1,2025-05-05T10:28:51.309683
+5,Round 3,Active learning round 2,2025-05-05T10:30:38.208568
