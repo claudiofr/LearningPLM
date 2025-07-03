@@ -9,6 +9,7 @@ import random
 import logging
 from sklearn.metrics import r2_score, mean_squared_error
 from scipy.stats import spearmanr
+import matplotlib.pyplot as plt
 
 
 logger = logging.getLogger(__name__)
@@ -292,3 +293,54 @@ def simulate_active_learning(
                 results[strategy][k].append(v)
 
     return results
+
+
+
+
+def plot_results(results: Dict[str, Dict[str, List[float]]], output_dir: Path):
+    import matplotlib.pyplot as plt
+
+    metrics = ["r2", "rmse", "spearman", "top_n_mean"]
+    metric_labels = ["R²", "RMSE", "Spearman Correlation", "Top-N Mean Score"]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Combined 2x2 grid summary plot
+    plt.figure(figsize=(15, 10))
+    for i, (metric, label) in enumerate(zip(metrics, metric_labels)):
+        plt.subplot(2, 2, i + 1)
+        for strategy, strategy_results in results.items():
+            values = strategy_results.get(metric, [])
+            rounds = list(range(1, len(values) + 1))
+            if values:
+                plt.plot(rounds, values, marker="o", label=strategy)
+        plt.xlabel("Round")
+        plt.ylabel(label)
+        plt.title(f"{label} vs. Round")
+        plt.legend()
+        plt.grid(True)
+
+    plt.tight_layout()
+    summary_path = output_dir / "active_learning_results.png"
+    plt.savefig(summary_path, dpi=300)
+    plt.close()
+    print(f"Saved combined plot: {summary_path}")
+
+    # Individual metric plots
+    for metric, label in zip(metrics, metric_labels):
+        plt.figure(figsize=(8, 6))
+        for strategy, strategy_results in results.items():
+            values = strategy_results.get(metric, [])
+            rounds = list(range(1, len(values) + 1))
+            if values:
+                plt.plot(rounds, values, marker="o", label=strategy)
+        plt.xlabel("Round")
+        plt.ylabel(label)
+        plt.title(f"{label} vs. Round")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        metric_path = output_dir / f"{metric}_vs_round.png"
+        plt.savefig(metric_path, dpi=300)
+        plt.close()
+        print(f"Saved {metric} plot: {metric_path}")
