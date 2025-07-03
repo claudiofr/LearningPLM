@@ -14,6 +14,7 @@ from plm_framework.embedding import ProteinEmbedder
 from plm_framework.learners.active import MLPLearner, RidgeLearner
 from plm_framework.learners.base import BaseLearner
 from plm_framework.learners.rl import RLPolicyLearner
+from plm_framework.strategies import STRATEGY_LOOKUP
 
 
 logger = logging.getLogger(__name__)
@@ -274,6 +275,19 @@ class Controller:
             logger.info(
                 f"Got embeddings for {len(variant_ids)} variants with shape {embeddings.shape}")
 
+            # If custom strategy, handle directly
+            if strategy in STRATEGY_LOOKUP:
+                proposed_variants = self._propose_custom_variants(candidates, embeddings, batch_size, strategy)
+                if proposed_variants:
+                    self.current_round.proposed_variants.extend(proposed_variants)
+                    logger.info(
+                        f"Added {len(proposed_variants)} variants to current round (now has {len(self.current_round.proposed_variants)} total)"
+                    )
+                else:
+                    logger.error("No variants were selected for proposal!")
+                return proposed_variants
+
+
             # Check if embeddings were successfully generated
             if len(variant_ids) == 0 or embeddings.shape[0] == 0:
                 logger.error("Failed to generate embeddings for candidates!")
@@ -310,22 +324,22 @@ class Controller:
                     temperature=temperature,
                     **kwargs,
                 )
-            else:
-                # Use diversity sampling or ESM logit sampling if model is not fitted
-                actual_strategy = strategy if strategy in [
-                    "diversity", "esm_logit", "random"] else "diversity"
-                logger.info(
-                    f"Model not fitted or using non-model strategy. Using {actual_strategy} sampling")
+            # else:
+            #     # Use diversity sampling or ESM logit sampling if model is not fitted
+            #     actual_strategy = strategy if strategy in [
+            #         "diversity", "esm_logit", "random"] else "diversity"
+            #     logger.info(
+            #         f"Model not fitted or using non-model strategy. Using {actual_strategy} sampling")
 
-                acquisition_scores = self.acquisition_function(
-                    variant_ids=variant_ids,
-                    embeddings=embeddings,
-                    strategy=actual_strategy,
-                    temperature=temperature,
-                    **kwargs,
-                )
-                # Update strategy to reflect what was actually used
-                strategy = actual_strategy
+            #     acquisition_scores = self.acquisition_function(
+            #         variant_ids=variant_ids,
+            #         embeddings=embeddings,
+            #         strategy=actual_strategy,
+            #         temperature=temperature,
+            #         **kwargs,
+            #     )
+            #     # Update strategy to reflect what was actually used
+            #     strategy = actual_strategy
 
             logger.info(
                 f"Generated acquisition scores for {len(acquisition_scores)} variants")
@@ -722,3 +736,38 @@ class Controller:
             # Return uniform scores as fallback
             logger.warning("Using uniform scores as fallback")
             return np.ones(len(variant_ids))
+        
+        
+    def _propose_custom_variants(
+        self,
+        candidates: List[Variant],
+        embeddings: np.ndarray,
+        batch_size: int,
+        strategy: str
+    ) -> List[ProposedVariant]:
+        if strategy not in STRATEGY_LOOKUP:
+            raise ValueError(f"Unknown custom strategy: {strategy}")
+
+        strategy_instance = STRATEGY_LOOKUP[strategy]
+
+        # Defensive learner checks
+        if strategy == "qbc" and not hasattr(self.learner, "predict_committee"):
+            logger.error("Learner does not support QBC. Falling back to diversity.")
+            return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+
+        if strategy in ["ucb", "uncertainty"]:
+            if not hasattr(self.learner, "predict"):
+                logger.error(f"Learner does not support predict. Falling back to diversity.")
+                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+
+            # Try calling predict with return_std=True once to confirm support
+            try:
+                _ = self.learner.predict(embeddings[:1], return_std=True)
+            except TypeError:
+                logger.error(f"Learner.predict does not support return_std=True. Falling back to diversity.")
+                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+            except Exception as e:
+                logger.error(f"Learner.predict failed: {e}. Falling back to diversity.")
+                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+
+        return strategy_instance.propose(candidates, embeddings, batch_size, self.learner)
