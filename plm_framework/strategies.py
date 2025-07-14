@@ -9,6 +9,10 @@ from plm_framework.learners.base import BaseLearner
 
 class ProposalStrategy(ABC):
     """Abstract base class for proposal strategies."""
+
+    def __init__(self, **kwargs):
+        pass  # Accept kwargs in all subclasses via this constructor
+
     @abstractmethod
     def propose(
         self,
@@ -104,13 +108,20 @@ class UCBStrategy(ProposalStrategy):
         ]
 
 
-# Lookup table
-STRATEGY_LOOKUP = {
-    "random": RandomStrategy(),
-    "greedy": GreedyStrategy(),
-    "uncertainty": UncertaintyStrategy(),
-    "diversity": DiversityStrategy(),
-    "qbc": QBCStrategy(),
-    "ucb": UCBStrategy(lambda_coef=1.0),
-    # add thompson sampling or entropy? 
-}
+class StrategyFactory:
+    """Factory to create acquisition strategy instances."""
+    STRATEGY_CLASSES = {
+        "random": RandomStrategy,
+        "greedy": GreedyStrategy,
+        "uncertainty": UncertaintyStrategy,
+        "diversity": DiversityStrategy,
+        "qbc": QBCStrategy,
+        "ucb": UCBStrategy,
+        # add thompson sampling or entropy? 
+    }
+
+    @staticmethod
+    def create_instance(strategy_name: str, **kwargs) -> ProposalStrategy:
+        if strategy_name not in StrategyFactory.STRATEGY_CLASSES:
+            raise ValueError(f"Unknown strategy: {strategy_name}")
+        return StrategyFactory.STRATEGY_CLASSES[strategy_name](**kwargs)
