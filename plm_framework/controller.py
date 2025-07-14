@@ -297,71 +297,18 @@ class Controller:
             import traceback
             logger.error(traceback.format_exc())
             return []
-
-        # Create proposed variants
-        try:
-            proposed_variants = []
-            for i, (vid, score) in enumerate(zip(variant_ids, acquisition_scores)):
-                # Find the variant with matching ID
-                matching_variants = [
-                    v for v in candidates if str(v.id) == str(vid)]
-                if not matching_variants:
-                    logger.warning(f"No matching variant found for ID {vid}")
-                    continue
-
-                variant = matching_variants[0]
-
-                # Get predicted score and uncertainty if model is fitted
-                predicted_score = None
-                predicted_uncertainty = None
-                if hasattr(self, 'learner') and self.learner.is_fitted:
-                    try:
-                        pred, unc = self.learner.predict_single(
-                            embeddings[i], return_std=True)
-                        predicted_score = float(pred)
-                        predicted_uncertainty = float(unc)
-                    except Exception as e:
-                        logger.warning(
-                            f"Error getting prediction for variant {vid}: {e}")
-
-                # Create proposed variant
-                proposed_variants.append(
-                    ProposedVariant(
-                        variant=variant,
-                        acquisition_score=float(score),
-                        acquisition_type=strategy,
-                        predicted_score=predicted_score,
-                        predicted_uncertainty=predicted_uncertainty,
-                    )
-                )
-
-            logger.info(f"Created {len(proposed_variants)} proposed variants")
-
-            # Sort by acquisition score (higher is better)
-            proposed_variants.sort(
-                key=lambda x: x.acquisition_score, reverse=True)
-
-            # Limit to batch size
-            proposed_variants = proposed_variants[:batch_size]
-
+        
+        # Save proposed variants to current round
+        if proposed_variants:
+            self.current_round.proposed_variants.extend(proposed_variants)
             logger.info(
-                f"Selected {len(proposed_variants)} variants after limiting to batch size {batch_size}")
+                f"Added {len(proposed_variants)} variants to current round (now has {len(self.current_round.proposed_variants)} total)"
+            )
+        else:
+            logger.error("No variants were selected for proposal!")
 
-            # Save proposed variants to current round
-            if proposed_variants:
-                self.current_round.proposed_variants.extend(proposed_variants)
-                logger.info(
-                    f"Added {len(proposed_variants)} variants to current round (now has {len(self.current_round.proposed_variants)} total)")
-            else:
-                logger.error("No variants were selected for proposal!")
+        return proposed_variants
 
-            return proposed_variants
-
-        except Exception as e:
-            logger.error(f"Error creating proposed variants: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return []
 
     def add_assay_results(self, results: List[AssayResult]) -> None:
         """
