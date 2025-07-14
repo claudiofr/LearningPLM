@@ -14,7 +14,8 @@ from plm_framework.embedding import ProteinEmbedder
 from plm_framework.learners.active import MLPLearner, RidgeLearner
 from plm_framework.learners.base import BaseLearner
 from plm_framework.learners.rl import RLPolicyLearner
-from plm_framework.strategies import STRATEGY_LOOKUP
+# from plm_framework.strategies import STRATEGY_LOOKUP
+from plm_framework.strategies import StrategyFactory
 
 
 logger = logging.getLogger(__name__)
@@ -275,17 +276,15 @@ class Controller:
             logger.info(
                 f"Got embeddings for {len(variant_ids)} variants with shape {embeddings.shape}")
 
-            # If custom strategy, handle directly
-            if strategy in STRATEGY_LOOKUP:
-                proposed_variants = self._propose_custom_variants(candidates, embeddings, batch_size, strategy)
-                if proposed_variants:
-                    self.current_round.proposed_variants.extend(proposed_variants)
-                    logger.info(
-                        f"Added {len(proposed_variants)} variants to current round (now has {len(self.current_round.proposed_variants)} total)"
-                    )
-                else:
-                    logger.error("No variants were selected for proposal!")
-                return proposed_variants
+            try:
+                strategy_instance = StrategyFactory.create_instance(strategy, **kwargs)
+                proposed_variants = strategy_instance.propose(candidates, embeddings, batch_size, self.learner)
+            except Exception as e:
+                logger.error(f"Failed to apply strategy {strategy}: {e}")
+                logger.warning("Falling back to diversity strategy")
+                strategy_instance = StrategyFactory.create_instance("diversity")
+                proposed_variants = strategy_instance.propose(candidates, embeddings, batch_size, self.learner)
+
 
 
             # Check if embeddings were successfully generated
@@ -299,57 +298,57 @@ class Controller:
             logger.error(traceback.format_exc())
             return []
 
-        # Use acquisition function to select variants
-        try:
-            # Check if model is fitted
-            if hasattr(self, 'learner') and self.learner.is_fitted and strategy not in ["diversity", "esm_logit", "random"]:
-                logger.info("Using model-based acquisition")
-                # Get predictions and uncertainties for all candidates
-                predictions, uncertainties = self.learner.predict(
-                    embeddings, return_std=True)
-                logger.info(
-                    f"Generated predictions for {len(predictions)} variants")
-                logger.info(
-                    f"Prediction range: min={np.min(predictions):.4f}, max={np.max(predictions):.4f}, mean={np.mean(predictions):.4f}")
-                logger.info(
-                    f"Uncertainty range: min={np.min(uncertainties):.4f}, max={np.max(uncertainties):.4f}, mean={np.mean(uncertainties):.4f}")
+        # # Use acquisition function to select variants
+        # try:
+        #     # Check if model is fitted
+        #     if hasattr(self, 'learner') and self.learner.is_fitted and strategy not in ["diversity", "esm_logit", "random"]:
+        #         logger.info("Using model-based acquisition")
+        #         # Get predictions and uncertainties for all candidates
+        #         predictions, uncertainties = self.learner.predict(
+        #             embeddings, return_std=True)
+        #         logger.info(
+        #             f"Generated predictions for {len(predictions)} variants")
+        #         logger.info(
+        #             f"Prediction range: min={np.min(predictions):.4f}, max={np.max(predictions):.4f}, mean={np.mean(predictions):.4f}")
+        #         logger.info(
+        #             f"Uncertainty range: min={np.min(uncertainties):.4f}, max={np.max(uncertainties):.4f}, mean={np.mean(uncertainties):.4f}")
 
-                # Use acquisition function
-                acquisition_scores = self.acquisition_function(
-                    variant_ids=variant_ids,
-                    embeddings=embeddings,
-                    predictions=predictions,
-                    uncertainties=uncertainties,
-                    strategy=strategy,
-                    temperature=temperature,
-                    **kwargs,
-                )
-            # else:
-            #     # Use diversity sampling or ESM logit sampling if model is not fitted
-            #     actual_strategy = strategy if strategy in [
-            #         "diversity", "esm_logit", "random"] else "diversity"
-            #     logger.info(
-            #         f"Model not fitted or using non-model strategy. Using {actual_strategy} sampling")
+        #         # Use acquisition function
+        #         acquisition_scores = self.acquisition_function(
+        #             variant_ids=variant_ids,
+        #             embeddings=embeddings,
+        #             predictions=predictions,
+        #             uncertainties=uncertainties,
+        #             strategy=strategy,
+        #             temperature=temperature,
+        #             **kwargs,
+        #         )
+        #     # else:
+        #     #     # Use diversity sampling or ESM logit sampling if model is not fitted
+        #     #     actual_strategy = strategy if strategy in [
+        #     #         "diversity", "esm_logit", "random"] else "diversity"
+        #     #     logger.info(
+        #     #         f"Model not fitted or using non-model strategy. Using {actual_strategy} sampling")
 
-            #     acquisition_scores = self.acquisition_function(
-            #         variant_ids=variant_ids,
-            #         embeddings=embeddings,
-            #         strategy=actual_strategy,
-            #         temperature=temperature,
-            #         **kwargs,
-            #     )
-            #     # Update strategy to reflect what was actually used
-            #     strategy = actual_strategy
+        #     #     acquisition_scores = self.acquisition_function(
+        #     #         variant_ids=variant_ids,
+        #     #         embeddings=embeddings,
+        #     #         strategy=actual_strategy,
+        #     #         temperature=temperature,
+        #     #         **kwargs,
+        #     #     )
+        #     #     # Update strategy to reflect what was actually used
+        #     #     strategy = actual_strategy
 
-            logger.info(
-                f"Generated acquisition scores for {len(acquisition_scores)} variants")
-            logger.info(
-                f"Score range: min={np.min(acquisition_scores):.4f}, max={np.max(acquisition_scores):.4f}, mean={np.mean(acquisition_scores):.4f}")
+        #     logger.info(
+        #         f"Generated acquisition scores for {len(acquisition_scores)} variants")
+        #     logger.info(
+        #         f"Score range: min={np.min(acquisition_scores):.4f}, max={np.max(acquisition_scores):.4f}, mean={np.mean(acquisition_scores):.4f}")
 
-            # Check if acquisition scores were successfully generated
-            if len(acquisition_scores) == 0:
-                logger.error("Failed to generate acquisition scores!")
-                return []
+        #     # Check if acquisition scores were successfully generated
+        #     if len(acquisition_scores) == 0:
+        #         logger.error("Failed to generate acquisition scores!")
+        #         return []
 
         except Exception as e:
             logger.error(f"Error in acquisition function: {e}")
@@ -683,91 +682,91 @@ class Controller:
 
         logger.info(f"Exported results to {output_dir}")
 
-    def acquisition_function(
-        self,
-        variant_ids: List[str],
-        embeddings: np.ndarray,
-        predictions: Optional[np.ndarray] = None,
-        uncertainties: Optional[np.ndarray] = None,
-        strategy: str = "ucb",
-        temperature: float = 1.0,
-        **kwargs,
-    ) -> np.ndarray:
-        """
-        Acquisition function for selecting variants.
+    # def acquisition_function(
+    #     self,
+    #     variant_ids: List[str],
+    #     embeddings: np.ndarray,
+    #     predictions: Optional[np.ndarray] = None,
+    #     uncertainties: Optional[np.ndarray] = None,
+    #     strategy: str = "ucb",
+    #     temperature: float = 1.0,
+    #     **kwargs,
+    # ) -> np.ndarray:
+    #     """
+    #     Acquisition function for selecting variants.
 
-        Args:
-            variant_ids: List of variant IDs
-            embeddings: Embeddings for variants
-            predictions: Optional predictions for variants
-            uncertainties: Optional uncertainties for variants
-            strategy: Acquisition strategy
-            temperature: Temperature for softmax
-            **kwargs: Additional parameters for acquisition function
+    #     Args:
+    #         variant_ids: List of variant IDs
+    #         embeddings: Embeddings for variants
+    #         predictions: Optional predictions for variants
+    #         uncertainties: Optional uncertainties for variants
+    #         strategy: Acquisition strategy
+    #         temperature: Temperature for softmax
+    #         **kwargs: Additional parameters for acquisition function
 
-        Returns:
-            Acquisition scores for variants
-        """
-        from plm_framework.acquisition import batch_acquisition
+    #     Returns:
+    #         Acquisition scores for variants
+    #     """
+    #     from plm_framework.acquisition import batch_acquisition
 
-        logger.info(f"Running acquisition function with strategy: {strategy}")
+    #     logger.info(f"Running acquisition function with strategy: {strategy}")
 
-        try:
-            # Run acquisition function
-            acquisition_scores = batch_acquisition(
-                variant_ids=variant_ids,
-                embeddings=embeddings,
-                predictions=predictions,
-                uncertainties=uncertainties,
-                strategy=strategy,
-                temperature=temperature,
-                **kwargs,
-            )
+    #     try:
+    #         # Run acquisition function
+    #         acquisition_scores = batch_acquisition(
+    #             variant_ids=variant_ids,
+    #             embeddings=embeddings,
+    #             predictions=predictions,
+    #             uncertainties=uncertainties,
+    #             strategy=strategy,
+    #             temperature=temperature,
+    #             **kwargs,
+    #         )
 
-            logger.info(
-                f"Generated {len(acquisition_scores)} acquisition scores")
-            logger.info(
-                f"Score range: min={np.min(acquisition_scores):.4f}, max={np.max(acquisition_scores):.4f}, mean={np.mean(acquisition_scores):.4f}")
+    #         logger.info(
+    #             f"Generated {len(acquisition_scores)} acquisition scores")
+    #         logger.info(
+    #             f"Score range: min={np.min(acquisition_scores):.4f}, max={np.max(acquisition_scores):.4f}, mean={np.mean(acquisition_scores):.4f}")
 
-            return acquisition_scores
+    #         return acquisition_scores
 
-        except Exception as e:
-            logger.error(f"Error in batch_acquisition: {e}")
-            # Return uniform scores as fallback
-            logger.warning("Using uniform scores as fallback")
-            return np.ones(len(variant_ids))
+    #     except Exception as e:
+    #         logger.error(f"Error in batch_acquisition: {e}")
+    #         # Return uniform scores as fallback
+    #         logger.warning("Using uniform scores as fallback")
+    #         return np.ones(len(variant_ids))
         
-        
-    def _propose_custom_variants(
-        self,
-        candidates: List[Variant],
-        embeddings: np.ndarray,
-        batch_size: int,
-        strategy: str
-    ) -> List[ProposedVariant]:
-        if strategy not in STRATEGY_LOOKUP:
-            raise ValueError(f"Unknown custom strategy: {strategy}")
 
-        strategy_instance = STRATEGY_LOOKUP[strategy]
+    # def _propose_custom_variants(
+    #     self,
+    #     candidates: List[Variant],
+    #     embeddings: np.ndarray,
+    #     batch_size: int,
+    #     strategy: str
+    # ) -> List[ProposedVariant]:
+    #     if strategy not in STRATEGY_LOOKUP:
+    #         raise ValueError(f"Unknown custom strategy: {strategy}")
 
-        # Defensive learner checks
-        if strategy == "qbc" and not hasattr(self.learner, "predict_committee"):
-            logger.error("Learner does not support QBC. Falling back to diversity.")
-            return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+    #     strategy_instance = STRATEGY_LOOKUP[strategy]
 
-        if strategy in ["ucb", "uncertainty"]:
-            if not hasattr(self.learner, "predict"):
-                logger.error(f"Learner does not support predict. Falling back to diversity.")
-                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+    #     # Defensive learner checks
+    #     if strategy == "qbc" and not hasattr(self.learner, "predict_committee"):
+    #         logger.error("Learner does not support QBC. Falling back to diversity.")
+    #         return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
 
-            # Try calling predict with return_std=True once to confirm support
-            try:
-                _ = self.learner.predict(embeddings[:1], return_std=True)
-            except TypeError:
-                logger.error(f"Learner.predict does not support return_std=True. Falling back to diversity.")
-                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
-            except Exception as e:
-                logger.error(f"Learner.predict failed: {e}. Falling back to diversity.")
-                return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+    #     if strategy in ["ucb", "uncertainty"]:
+    #         if not hasattr(self.learner, "predict"):
+    #             logger.error(f"Learner does not support predict. Falling back to diversity.")
+    #             return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
 
-        return strategy_instance.propose(candidates, embeddings, batch_size, self.learner)
+    #         # Try calling predict with return_std=True once to confirm support
+    #         try:
+    #             _ = self.learner.predict(embeddings[:1], return_std=True)
+    #         except TypeError:
+    #             logger.error(f"Learner.predict does not support return_std=True. Falling back to diversity.")
+    #             return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+    #         except Exception as e:
+    #             logger.error(f"Learner.predict failed: {e}. Falling back to diversity.")
+    #             return STRATEGY_LOOKUP["diversity"].propose(candidates, embeddings, batch_size, self.learner)
+
+    #     return strategy_instance.propose(candidates, embeddings, batch_size, self.learner)
