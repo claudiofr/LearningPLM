@@ -1,6 +1,8 @@
 model:
-  name: facebook/esm2_t33_650M_UR50D
-  embedding_dim: 1280
+  # name: facebook/esm2_t33_650M_UR50D
+  # embedding_dim: 1280
+  name: facebook/esm2_t6_8M_UR50D
+  embedding_dim: 320  # this is the correct dim for esm2_t6_8M
   reduced_dim: null
   use_pooling: true
   quantize: false
